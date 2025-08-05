@@ -48,8 +48,9 @@ def predict_next_state(input_str, model, tokenizer, device):
     if cleaned:
         return cleaned[0]  # Return the first predicted value
     else:
-        return "No valid prediction found."
-    
+        print("No valid prediction found.")
+        return "0.0"
+
 def run_inference():
     model, tokenizer, device = load_model()
 

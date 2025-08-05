@@ -1,1 +1,6 @@
+checkpoints/
+data/predicted_logs.csv
+data/test_logs.csv
 data/node_logs.txt
+_pycache_/
+**/__pycache__/
