@@ -4,6 +4,9 @@ import csv
 import math
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 
+plt.rcParams['font.sans-serif'] = ['SimHei']  # 设置中文字体
+plt.rcParams['axes.unicode_minus'] = False    # 解决负号'-'显示为方块的问题
+
 def load_ground_truth(log_path, target_index=3):
     """
     Load next value from node_logs.txt
