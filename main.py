@@ -5,10 +5,11 @@ from data.prepare_dataset import prepare_dataset
 from train.train_lora import train_lora
 from infer import run_inference
 from batch_infer import run_batch_inference
+from evaluate import main as evaluate_main
 
 def main():
     parser = argparse.ArgumentParser(description="EdgeLLM Scheduler Pipeline")
-    parser.add_argument("--stage", type=str, required=True, choices=["generate", "preprocess", "train", "infer", "batch_infer"], help="执行的阶段：generate, preprocess, train, infer, batch_infer")
+    parser.add_argument("--stage", type=str, required=True, choices=["generate", "preprocess", "train", "infer", "batch_infer", "evaluate"], help="执行的阶段：generate, preprocess, train, infer, batch_infer, evaluate")
 
     args = parser.parse_args()
 
@@ -30,6 +31,9 @@ def main():
             input_file="data/test_logs.csv",
             output_file="data/predicted_logs.csv"
         )
+    elif args.stage == "evaluate":
+        print("[Stage] Evaluating results...")
+        evaluate_main()
     else:
         print(f"Unknown stage: {args.stage}")
 
