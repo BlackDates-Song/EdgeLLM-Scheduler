@@ -103,6 +103,3 @@ def main():
 
     gt, pred = evaluate(ground_truth, predictions)
     plot_results(gt, pred)
-
-if __name__ == "__main__":
-    main()
