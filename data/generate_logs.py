@@ -11,7 +11,7 @@ def generate_logs():
     # output path
     os.makedirs("data", exist_ok=True)
     log_path = "data/node_logs.txt"
-    csv_path = "data/test_logs.csv"
+    csv_path = "data/node_logs.csv"
 
     # generate logs
     with open(log_path, "w") as log_file, open(csv_path, "w", newline='') as csv_file:

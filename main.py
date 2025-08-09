@@ -28,7 +28,7 @@ def main():
     elif args.stage == "batch_infer":
         print("[Stage] Running batch inference...")
         run_batch_inference(
-            input_file="data/test_logs.csv",
+            input_file="data/node_logs.csv",
             output_file="data/predicted_logs.csv"
         )
     elif args.stage == "evaluate":
