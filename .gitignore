@@ -1,4 +1,4 @@
-checkpoints/
+model_output/
 data/*.csv
 data/*.txt
 data/*.png

@@ -1,3 +1,5 @@
-import torch
-print(torch.cuda.is_available())
-print(torch.version.cuda)
+import transformers
+from transformers import TrainingArguments
+print(transformers.__version__)
+print(transformers.__file__)
+print(TrainingArguments)

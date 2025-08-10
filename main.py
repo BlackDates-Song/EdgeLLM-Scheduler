@@ -2,8 +2,8 @@ import argparse
 
 from data.generate_logs import generate_logs
 from data.prepare_dataset import prepare_dataset
-from train.train_lora import train_lora
-from infer import run_inference
+from train.train_lora import main as train_lora
+from infer import main as run_inference
 from batch_infer import run_batch_inference
 from evaluate import main as evaluate_main
 

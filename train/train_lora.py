@@ -1,57 +1,75 @@
 import os
-from transformers import GPT2Tokenizer, GPT2LMHeadModel, TrainingArguments, Trainer, DataCollatorForLanguageModeling
-from datasets import load_from_disk
-from peft import get_peft_model, LoraConfig, TaskType
+import torch
+from torch.utils.data import DataLoader
+from transformers import GPT2LMHeadModel, Trainer, TrainingArguments, DataCollatorForLanguageModeling
+from data.tokenize_dataset import MultiVarDataset, get_tokenizer
 
-def train_lora():
-    # load pretrained model and tokenizer
+# INITIAL SETTING
+DATA_FILE = "data/training_data.txt"
+OUTPUT_DIR = "model_output"
+BLOCK_SIZE = 128
+BATCH_SIZE = 4
+EPOCHS = 5
+LR = 5e-5
+
+def main():
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    #load tokenizer
+    tokenizer = get_tokenizer()
+
+    #load dataset
+    dataset = MultiVarDataset(DATA_FILE, tokenizer, block_size=BLOCK_SIZE)
+    
+    #split train
+    train_size = int (0.9 * len(dataset))
+    val_size = len(dataset) - train_size
+    train_dataset, val_dataset = torch.utils.data.random_split(dataset, [train_size, val_size])
+
+    #load model
     model = GPT2LMHeadModel.from_pretrained("gpt2")
-    tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
-    tokenizer.pad_token = tokenizer.eos_token
+    model.resize_token_embeddings(len(tokenizer))
 
-    # use LoRA config
-    lora_config = LoraConfig(
-        r=8,
-        lora_alpha=16,
-        target_modules=["c_attn", "c_proj"],
-        lora_dropout=0.1,
-        bias="none",
-        task_type=TaskType.CAUSAL_LM
-    )
-    model = get_peft_model(model, lora_config)
-
-    # load dataset
-    dataset = load_from_disk("data/tokenized_dataset")
-
-    # auto padding and MLM off
-    data_collator = DataCollatorForLanguageModeling(
-        tokenizer=tokenizer, mlm=False
-    )
-
-    # training arguments
+    #training arguments
     training_args = TrainingArguments(
-        output_dir="checkpoints/gpt2_lora",
+        output_dir=OUTPUT_DIR,
         overwrite_output_dir=True,
-        per_device_train_batch_size=8,
-        num_train_epochs=5,
-        learning_rate=5e-5,
+        num_train_epochs=EPOCHS,
+        per_device_train_batch_size=BATCH_SIZE,
+        per_device_eval_batch_size=BATCH_SIZE,
+        eval_strategy="epoch",
         save_strategy="epoch",
-        logging_steps=20,
-        fp16=True,
+        logging_dir=os.path.join(OUTPUT_DIR, "logs"),
+        logging_steps=50,
+        learning_rate=LR,
+        weight_decay=0.01,
+        save_total_limit=2,
+        load_best_model_at_end=True,
         report_to="none"
     )
 
-    # trainer
+    #data collator
+    data_collator = DataCollatorForLanguageModeling(
+    tokenizer=tokenizer,
+    mlm=False
+    )
+
+    #Trainer
     trainer = Trainer(
         model=model,
         args=training_args,
-        train_dataset=dataset,
-        tokenizer=tokenizer,
+        train_dataset=train_dataset,
+        eval_dataset=val_dataset,
         data_collator=data_collator
     )
 
-    # start training
-    print("Starting training...")
+    # Train the model
     trainer.train()
-    trainer.save_model("checkpoints/gpt2-lora-final")
-    print("Training completed. The model is saved in 'checkpoints/gpt2-lora-final'.")
+
+    # Save the model
+    model.save_pretrained(OUTPUT_DIR)
+    tokenizer.save_pretrained(OUTPUT_DIR)
+    print(f"Model saved to {OUTPUT_DIR}")
+
+if __name__ == "__main__":
+    main()

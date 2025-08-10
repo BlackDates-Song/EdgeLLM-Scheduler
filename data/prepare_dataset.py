@@ -4,7 +4,7 @@ from datasets import Dataset
 import csv
 
 INPUT_FILE = "data/node_logs.csv"
-OUTPUT_FILE = "data/training_data.csv"
+OUTPUT_FILE = "data/training_data.txt"
 SEQ_LEN = 5
 
 def prepare_dataset():
@@ -31,13 +31,12 @@ def prepare_dataset():
             target = records[i + SEQ_LEN]
             input_str = ",".join(map(str, hist))
             output_str = ",".join(map(str, target))
-            training_rows.append([input_str +" -> "+ output_str])
+            training_rows.append(input_str + " -> " + output_str)
 
-    # 保存为CSV文件
-    with open(OUTPUT_FILE, 'w', newline='') as f:
-        writer = csv.writer(f)
+    # 保存为txt文件
+    with open(OUTPUT_FILE, 'w') as f:
         for row in training_rows:
-            writer.writerow(row)
+            f.write(row + "\n")
 
     print(f"Training data saved to {OUTPUT_FILE}, total {len(training_rows)} rows.")
 
