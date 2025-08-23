@@ -4,7 +4,7 @@ from datasets import Dataset
 import csv
 
 INPUT_FILE = "data/node_logs.csv"
-OUTPUT_FILE = "data/training_data.txt"
+OUTPUT_FILE = "data/training_data_cleaned.txt"
 SEQ_LEN = 5
 
 def prepare_dataset():
@@ -31,7 +31,16 @@ def prepare_dataset():
             target = records[i + SEQ_LEN]
             input_str = ",".join(map(str, hist))
             output_str = ",".join(map(str, target))
-            training_rows.append(input_str + " -> " + output_str)
+            row = input_str + " -> " + output_str
+
+            #清洗
+            s = row.strip()
+            if not s or "->" not in s:
+                continue
+            s = s.strip('"').replace('"', '')
+            if not s.endswith("<END>"):
+                s = s + " <END>"
+            training_rows.append(s)
 
     # 保存为txt文件
     with open(OUTPUT_FILE, 'w') as f:

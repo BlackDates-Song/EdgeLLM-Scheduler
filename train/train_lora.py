@@ -5,18 +5,20 @@ from transformers import GPT2LMHeadModel, Trainer, TrainingArguments, DataCollat
 from data.tokenize_dataset import MultiVarDataset, get_tokenizer
 
 # INITIAL SETTING
-DATA_FILE = "data/training_data.txt"
+DATA_FILE = "data/training_data_cleaned.txt"
 OUTPUT_DIR = "model_output"
 BLOCK_SIZE = 128
 BATCH_SIZE = 4
-EPOCHS = 5
-LR = 5e-5
+EPOCHS = 8
+LR = 1e-5
 
 def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     #load tokenizer
     tokenizer = get_tokenizer()
+    tokenizer.add_special_tokens({"additional_special_tokens": ["<END>"]})
+    END_ID = tokenizer.convert_tokens_to_ids("<END>")
 
     #load dataset
     dataset = MultiVarDataset(DATA_FILE, tokenizer, block_size=BLOCK_SIZE)
@@ -37,15 +39,17 @@ def main():
         num_train_epochs=EPOCHS,
         per_device_train_batch_size=BATCH_SIZE,
         per_device_eval_batch_size=BATCH_SIZE,
+        gradient_accumulation_steps=2,
         eval_strategy="epoch",
         save_strategy="epoch",
         logging_dir=os.path.join(OUTPUT_DIR, "logs"),
         logging_steps=50,
         learning_rate=LR,
         weight_decay=0.01,
-        save_total_limit=2,
+        save_total_limit=3,
         load_best_model_at_end=True,
-        report_to="none"
+        report_to="none",
+        fp16=True
     )
 
     #data collator
