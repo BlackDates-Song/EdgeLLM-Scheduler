@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 from transformers import GPT2LMHeadModel, GPT2Tokenizer
 
 MODEL_DIR = "model_output"
-DATA_FILE = "data/training_data.txt"
+DATA_FILE = "data/training_data_cleaned.txt"
 OUT_CSV = "data/pred_vs_gt_multi.csv"
 PLOT_ERR = "data/multi_error_hist.png"
 PLOT_LINE = "data/multi_pred_vs_gt.png"
@@ -16,15 +16,17 @@ def load_model():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     tokenizer = GPT2Tokenizer.from_pretrained(MODEL_DIR)
     tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.add_special_tokens({"additional_special_tokens": ["<END>"]})
+    END_ID = tokenizer.convert_tokens_to_ids("<END>")
     model = GPT2LMHeadModel.from_pretrained(MODEL_DIR).to(device)
     model.eval()
-    return tokenizer, model, device
+    return tokenizer, model, device, END_ID
 
 _float_pat = re.compile(r'[-+]?\d+(?:\.\d+)?')
 
 def extract_first_four(pred_text: str):
     after = pred_text.split("->",1)[1] if "->" in pred_text else pred_text
-    after = after.replace("", '').split("->")[0]
+    after = after.replace('"', ' ').split("<END>")[0].split("->")[0]
     nums = _float_pat.findall(after)
     return nums[:4]
 
@@ -32,7 +34,7 @@ def str4_to_floats(s: str):
     nums = _float_pat.findall(s)
     return [float(x) for x in nums[:4]] if len(nums) >= 4 else [float("nan")]*4
 
-def predict_next_state(history_str, tokenizer, model, device):
+def predict_next_state(history_str, tokenizer, model, device, END_ID):
     prompt = history_str.strip()
     if not prompt.endswith("->"):
         prompt = prompt + " ->"
@@ -43,6 +45,7 @@ def predict_next_state(history_str, tokenizer, model, device):
             max_new_tokens=24,
             do_sample=False,
             no_repeat_ngram_size=3,
+            eos_token_id=END_ID,
             pad_token_id=tokenizer.eos_token_id
         )
     decoded = tokenizer.decode(outputs[0], skip_special_tokens=True)
@@ -102,17 +105,17 @@ def plot_delay_curve(gt_delay, pred_delay, out_path, N=120):
     plt.close()
 
 def main():
-    tokenizer, model, device = load_model()
+    tokenizer, model, device, END_ID = load_model()
     pairs = read_pairs(DATA_FILE)
     print(f"Loaded {len(pairs)} samples from {DATA_FILE}")
 
     preds, gts, rows = [], [], []
     for hist, tgt in pairs:
         gt4 = str4_to_floats(tgt)
-        pr4 = predict_next_state(hist, tokenizer, model, device)
+        pr4 = predict_next_state(hist, tokenizer, model, device, END_ID)
         gts.append(gt4)
         preds.append(pr4)
-        rows.append((hist, *pr4, *gt4))
+        rows.append((hist, *gt4, *pr4))
 
     gts = np.array(gts, dtype=float)
     preds = np.array(preds, dtype=float)
