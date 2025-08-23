@@ -34,7 +34,7 @@ def str4_to_floats(s: str):
 
 def predict_next_state(history_str, tokenizer, model, device):
     prompt = history_str.strip()
-    if not prompt.endswitch("->"):
+    if not prompt.endswith("->"):
         prompt = prompt + " ->"
     inputs = tokenizer(prompt, return_tensors="pt").to(device)
     with torch.no_grad():
