@@ -12,6 +12,8 @@ OUT_CSV = "data/pred_vs_gt_multi.csv"
 PLOT_ERR = "data/multi_error_hist.png"
 PLOT_LINE = "data/multi_pred_vs_gt.png"
 
+_float_pat = re.compile(r'[-+]?\d+(?:\.\d+)?')
+
 def load_model():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     tokenizer = GPT2Tokenizer.from_pretrained(MODEL_DIR)
@@ -22,17 +24,18 @@ def load_model():
     model.eval()
     return tokenizer, model, device, END_ID
 
-_float_pat = re.compile(r'[-+]?\d+(?:\.\d+)?')
-
 def extract_first_four(pred_text: str):
     after = pred_text.split("->",1)[1] if "->" in pred_text else pred_text
     after = after.replace('"', ' ').split("<END>")[0].split("->")[0]
-    nums = _float_pat.findall(after)
-    return nums[:4]
+    nums = _float_pat.findall(after)[:4]
+    return nums
 
 def str4_to_floats(s: str):
     nums = _float_pat.findall(s)
-    return [float(x) for x in nums[:4]] if len(nums) >= 4 else [float("nan")]*4
+    if len(nums) >= 4:
+        return [float(x) for x in nums[:4]]
+    else:
+        return None
 
 def predict_next_state(history_str, tokenizer, model, device, END_ID):
     prompt = history_str.strip()
@@ -42,7 +45,7 @@ def predict_next_state(history_str, tokenizer, model, device, END_ID):
     with torch.no_grad():
         outputs = model.generate(
             **inputs,
-            max_new_tokens=24,
+            max_new_tokens=48,
             do_sample=False,
             no_repeat_ngram_size=3,
             eos_token_id=END_ID,
@@ -51,8 +54,11 @@ def predict_next_state(history_str, tokenizer, model, device, END_ID):
     decoded = tokenizer.decode(outputs[0], skip_special_tokens=True)
     vals = extract_first_four(decoded)
     if len(vals) < 4:
-        return [float("nan")]*4
-    return [float(x) for x in vals]
+        return None
+    try:
+        return [float(x) for x in vals]
+    except:
+        return None
 
 def read_pairs(path):
     pairs = []
@@ -109,13 +115,27 @@ def main():
     pairs = read_pairs(DATA_FILE)
     print(f"Loaded {len(pairs)} samples from {DATA_FILE}")
 
+    kept = 0
+    drop_gt = drop_pred = 0
     preds, gts, rows = [], [], []
     for hist, tgt in pairs:
         gt4 = str4_to_floats(tgt)
+        if gt4 is None:
+            drop_gt += 1
+            continue
         pr4 = predict_next_state(hist, tokenizer, model, device, END_ID)
+        if pr4 is None or len(pr4) != 4:
+            drop_pred += 1
+            continue
         gts.append(gt4)
         preds.append(pr4)
         rows.append((hist, *gt4, *pr4))
+        kept += 1
+
+    print(f"Kept {kept} samples, dropped {drop_gt} GT and {drop_pred} Pred")
+    if kept == 0:
+        print("No valid samples to evaluate.")
+        return
 
     gts = np.array(gts, dtype=float)
     preds = np.array(preds, dtype=float)
