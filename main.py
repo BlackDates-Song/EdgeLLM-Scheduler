@@ -1,7 +1,7 @@
 import argparse
 
 from data.generate_logs import generate_logs
-from data.prepare_dataset import prepare_dataset
+from data.prepare_dataset import main as prepare_dataset
 from train.train_lora import main as train_lora
 from infer import main as run_inference
 from batch_infer import run_batch_inference
@@ -11,14 +11,24 @@ def main():
     parser = argparse.ArgumentParser(description="EdgeLLM Scheduler Pipeline")
     parser.add_argument("--stage", type=str, required=True, choices=["generate", "preprocess", "train", "infer", "batch_infer", "evaluate"], help="执行的阶段：generate, preprocess, train, infer, batch_infer, evaluate")
 
-    args = parser.parse_args()
+    args, unknown = parser.parse_known_args()
 
     if args.stage == "generate":
         print("[Stage] Generating logs...")
         generate_logs()
     elif args.stage == "preprocess":
         print("[Stage] Preparing dataset...")
-        prepare_dataset()
+        filtered_args = []
+        skip = False
+        for i, arg in enumerate(unknown):
+            if skip:
+                skip = False
+                continue
+            if arg == "--stage":
+                skip = True
+                continue
+            filtered_args.append(arg)
+        prepare_dataset(filtered_args)
     elif args.stage == "train":
         print("[Stage] Training model...")
         train_lora()

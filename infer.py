@@ -2,11 +2,15 @@ import torch
 from transformers import GPT2LMHeadModel
 from data.tokenize_dataset import get_tokenizer
 import re
+import json
 
 MODEL_DIR = "model_output"
 MAX_LENGTH = 50
+SCALE = json.load(open("data/scale.json", 'r'))
 
-_float_pad_ = re.compile(r'[-+]?\d+(?:\.\d+)?')
+_num = re.compile(r'[-+]?\d+(?:\.\d+)?')
+_pair = re.compile(r'(CPU|MEM|DELAY|LOAD)\s*=\s*([-+]?\d+(?:\.\d+)?)', re.I)
+
 
 def load_model():
     tokenizer = get_tokenizer()
@@ -18,11 +22,35 @@ def load_model():
     model.to(device)
     return tokenizer, model, device, END_ID
 
-def get_first_prediction(prediction:str):
-    after = prediction.split("->", 1)[1] if "->" in prediction else prediction
-    after = after.replace('"', ' ').split("<END>")[0].split("->")[0]
-    nums = re.findall(r'[-+]?\d+(?:\.\d+)?', after)
-    return nums[:4]
+def denorm4(v4):
+    return [
+        v4[0] * SCALE["CPU"],
+        v4[1] * SCALE["MEM"],
+        v4[2] * SCALE["DELAY"],
+        v4[3] * SCALE["LOAD"],
+    ]
+
+def get_first_prediction(text:str):
+    text = text.split("<END>")[0].split("->")[1] if "->" in text else text
+    text = text.replace('"', ' ').strip()
+
+    got = {}
+    for k, v in _pair.findall(text):
+        got[k.upper()] = float(v)
+
+    order = ["CPU", "MEM", "DELAY", "LOAD"]
+    vals= []
+    for k in order:
+        if k in got:
+            vals.append(got[k])
+        else:
+            nums = _num.findall(text)
+            if len(nums) >= 4:
+                vals = [float(n) for n in nums[:4]]
+                break
+    if len(vals) != 4:
+        return None
+    return vals
 
 def predict_next_state(prompt, tokenizer, model, device, END_ID):
     inputs = tokenizer(prompt, return_tensors="pt").to(device)
@@ -38,7 +66,11 @@ def predict_next_state(prompt, tokenizer, model, device, END_ID):
         )
     decoded = tokenizer.decode(outputs[0], skip_special_tokens=True)
     first_prediction = get_first_prediction(decoded)
-    return first_prediction
+    vals = denorm4(first_prediction)
+
+    limits = [(1.0, 5.0), (2.0, 16.0), (5.0, 500.0), (0.0, 1.0)]
+    vals = [min(max(v, lo), hi) for v, (lo, hi) in zip(vals, limits)]
+    print("Predicted Next State ->", f"{vals[0]:.2f}, {vals[1]:.2f}, {vals[2]:.2f}, {vals[3]:.2f}")
 
 def format_prediction(prediction):
     nums = []

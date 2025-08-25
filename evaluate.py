@@ -1,4 +1,4 @@
-import os, re, csv, math
+import os, re, csv, math, json
 import numpy as np
 import torch
 import matplotlib
@@ -8,11 +8,15 @@ from transformers import GPT2LMHeadModel, GPT2Tokenizer
 
 MODEL_DIR = "model_output"
 DATA_FILE = "data/training_data_cleaned.txt"
+SCALE_JSON = "data/scale.json"
 OUT_CSV = "data/pred_vs_gt_multi.csv"
 PLOT_ERR = "data/multi_error_hist.png"
 PLOT_LINE = "data/multi_pred_vs_gt.png"
 
-_float_pat = re.compile(r'[-+]?\d+(?:\.\d+)?')
+_PAIR = re.compile(r'(CPU|MEM|DELAY|LOAD)\s*=\s*([-+]?\d+(?:\.\d+)?)', re.I)
+_NUM = re.compile(r'[-+]?\d+(?:\.\d+)?')
+
+LIMITS = [(1.0, 5.0), (2.0, 16.0), (5.0, 500.0), (0.0, 1.0)]
 
 def load_model():
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -24,23 +28,33 @@ def load_model():
     model.eval()
     return tokenizer, model, device, END_ID
 
-def extract_first_four(pred_text: str):
-    after = pred_text.split("->",1)[1] if "->" in pred_text else pred_text
-    after = after.replace('"', ' ').split("<END>")[0].split("->")[0]
-    nums = _float_pat.findall(after)[:4]
-    return nums
+def load_scale():
+    with open(SCALE_JSON, "r", encoding="utf-8") as f:
+        scale = json.load(f)
+    return scale
 
-def str4_to_floats(s: str):
-    nums = _float_pat.findall(s)
+def extract_first_four(pred_text: str):
+    txt = pred_text.replace('"', ' ')
+    txt = txt.split("<END>")[0].split("->")[0]
+    got = {}
+    for k, v in _PAIR.findall(txt):
+        got[k.upper()] = float(v)
+    order = ["CPU", "MEM", "DELAY", "LOAD"]
+    if all(k in got for k in order):
+        return [got[k] for k in order]
+    nums = _NUM.findall(txt)
     if len(nums) >= 4:
-        return [float(x) for x in nums[:4]]
-    else:
-        return None
+        try:
+            return [float(x) for x in nums[:4]]
+        except:
+            return None
+    return None
+
+def parse_gt_line(tgt: str):
+    return extract_first_four(tgt)
 
 def predict_next_state(history_str, tokenizer, model, device, END_ID):
-    prompt = history_str.strip()
-    if not prompt.endswith("->"):
-        prompt = prompt + " ->"
+    prompt = history_str if history_str.strip().endswith("->") else (history_str.strip() + " ->")
     inputs = tokenizer(prompt, return_tensors="pt").to(device)
     with torch.no_grad():
         outputs = model.generate(
@@ -52,13 +66,8 @@ def predict_next_state(history_str, tokenizer, model, device, END_ID):
             pad_token_id=tokenizer.eos_token_id
         )
     decoded = tokenizer.decode(outputs[0], skip_special_tokens=True)
-    vals = extract_first_four(decoded)
-    if len(vals) < 4:
-        return None
-    try:
-        return [float(x) for x in vals]
-    except:
-        return None
+    after = decoded.split("->", 1)[1] if "->" in decoded else decoded
+    return extract_first_four(after)
 
 def read_pairs(path):
     pairs = []
@@ -71,16 +80,28 @@ def read_pairs(path):
             pairs.append((hist.strip(), tgt.strip()))
     return pairs
 
+def denorm4(vals_norm, scale):
+    c = vals_norm[0] * scale["CPU"]
+    m = vals_norm[1] * scale["MEM"]
+    d = vals_norm[2] * scale["DELAY"]
+    l = vals_norm[3] * scale["LOAD"]
+    return [c, m, d, l]
+
+def clamp4(xs):
+    out = []
+    for v,(lo,hi) in zip(xs, LIMITS):
+        if v != v:
+            v = lo
+        v = min(max(v, lo), hi)
+        out.append(v)
+    return out
+
 def mae_rmse(gt_arr, pred_arr):
     metrics = []
     for j in range(gt_arr.shape[1]):
         gt = gt_arr[:, j]
         pr = pred_arr[:, j]
-        mask = ~np.isnan(gt) & ~np.isnan(pr)
-        if mask.sum() == 0:
-            metrics.append((float("nan"), float("nan")))
-            continue
-        diff = pr[mask] - gt[mask]
+        diff = pr - gt
         mae = np.mean(np.abs(diff))
         rmse = np.sqrt(np.mean(diff ** 2))
         metrics.append((mae, rmse))
@@ -104,7 +125,7 @@ def plot_delay_curve(gt_delay, pred_delay, out_path, N=120):
     plt.plot(x, pred_delay[:n], label="Pred Delay")
     plt.title(f"Prediction vs GT (Delay) - first {n} samples")
     plt.xlabel("Sample")
-    plt.ylabel("Delay")
+    plt.ylabel("Delay (ms)")
     plt.legend()
     plt.tight_layout()
     plt.savefig(out_path)
@@ -112,24 +133,28 @@ def plot_delay_curve(gt_delay, pred_delay, out_path, N=120):
 
 def main():
     tokenizer, model, device, END_ID = load_model()
+    scale = load_scale()
     pairs = read_pairs(DATA_FILE)
     print(f"Loaded {len(pairs)} samples from {DATA_FILE}")
 
     kept = 0
     drop_gt = drop_pred = 0
     preds, gts, rows = [], [], []
+
     for hist, tgt in pairs:
-        gt4 = str4_to_floats(tgt)
-        if gt4 is None:
+        gt_n = parse_gt_line(tgt)
+        if gt_n is None or len(gt_n) != 4:
             drop_gt += 1
             continue
-        pr4 = predict_next_state(hist, tokenizer, model, device, END_ID)
-        if pr4 is None or len(pr4) != 4:
+        pr_n = predict_next_state(hist, tokenizer, model, device, END_ID)
+        if pr_n is None or len(pr_n) != 4:
             drop_pred += 1
             continue
-        gts.append(gt4)
-        preds.append(pr4)
-        rows.append((hist, *gt4, *pr4))
+        gt = clamp4(denorm4(gt_n, scale))
+        pr = clamp4(denorm4(pr_n, scale))
+        gts.append(gt)
+        preds.append(pr)
+        rows.append((hist, *gt, *pr))
         kept += 1
 
     print(f"Kept {kept} samples, dropped {drop_gt} GT and {drop_pred} Pred")
@@ -156,7 +181,6 @@ def main():
         print(f"{dims[i]}: MAE = {mae:.4f}, RMSE = {rmse:.4f}")
 
     all_err = (preds - gts).reshape(-1)
-    all_err = all_err[~np.isnan(all_err)]
     plot_error_hist(all_err, PLOT_ERR)
     print(f"Saved error histogram to {PLOT_ERR}")
 

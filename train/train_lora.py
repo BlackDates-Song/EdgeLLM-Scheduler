@@ -8,8 +8,8 @@ from data.tokenize_dataset import MultiVarDataset, get_tokenizer
 DATA_FILE = "data/training_data_cleaned.txt"
 OUTPUT_DIR = "model_output"
 BLOCK_SIZE = 128
-BATCH_SIZE = 4
-EPOCHS = 8
+BATCH_SIZE = 16
+EPOCHS = 12
 LR = 1e-5
 
 def main():
