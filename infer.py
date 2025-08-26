@@ -70,7 +70,7 @@ def predict_next_state(prompt, tokenizer, model, device, END_ID):
 
     limits = [(1.0, 5.0), (2.0, 16.0), (5.0, 500.0), (0.0, 1.0)]
     vals = [min(max(v, lo), hi) for v, (lo, hi) in zip(vals, limits)]
-    print("Predicted Next State ->", f"{vals[0]:.2f}, {vals[1]:.2f}, {vals[2]:.2f}, {vals[3]:.2f}")
+    print("Predicted Next State ->", f"{vals[0]:.2f}, {vals[1]:.2f}, {vals[2]:.0f}, {vals[3]:.2f}")
 
 def format_prediction(prediction):
     nums = []

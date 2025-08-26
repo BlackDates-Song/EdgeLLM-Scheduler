@@ -3,6 +3,7 @@ import torch
 from torch.utils.data import DataLoader
 from transformers import GPT2LMHeadModel, Trainer, TrainingArguments, DataCollatorForLanguageModeling
 from data.tokenize_dataset import MultiVarDataset, get_tokenizer
+from peft import LoraConfig, get_peft_model, TaskType
 
 # INITIAL SETTING
 DATA_FILE = "data/training_data_cleaned.txt"
@@ -11,6 +12,11 @@ BLOCK_SIZE = 128
 BATCH_SIZE = 16
 EPOCHS = 12
 LR = 1e-5
+
+LORA_R = 32
+LORA_ALPHA = 32
+LORA_DROPOUT = 0.05
+TARGET_MODULES = ["c_attn", "c_proj"]
 
 def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -31,6 +37,17 @@ def main():
     #load model
     model = GPT2LMHeadModel.from_pretrained("gpt2")
     model.resize_token_embeddings(len(tokenizer))
+
+    lora_cfg = LoraConfig(
+        r=LORA_R,
+        lora_alpha=LORA_ALPHA,
+        lora_dropout=LORA_DROPOUT,
+        target_modules=TARGET_MODULES,
+        bias="none",
+        task_type=TaskType.CAUSAL_LM
+    )
+    model = get_peft_model(model, lora_cfg)
+    model.print_trainable_parameters()
 
     #training arguments
     training_args = TrainingArguments(

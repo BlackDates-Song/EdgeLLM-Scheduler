@@ -4,7 +4,7 @@ import torch
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-from transformers import GPT2LMHeadModel, GPT2Tokenizer
+from transformers import GPT2LMHeadModel, GPT2Tokenizer, AutoConfig
 
 MODEL_DIR = "model_output"
 DATA_FILE = "data/training_data_cleaned.txt"
@@ -16,7 +16,7 @@ PLOT_LINE = "data/multi_pred_vs_gt.png"
 _PAIR = re.compile(r'(CPU|MEM|DELAY|LOAD)\s*=\s*([-+]?\d+(?:\.\d+)?)', re.I)
 _NUM = re.compile(r'[-+]?\d+(?:\.\d+)?')
 
-LIMITS = [(1.0, 5.0), (2.0, 16.0), (5.0, 500.0), (0.0, 1.0)]
+LIMITS = [(1.0000, 5.0000), (2.0000, 16.0000), (5.0000, 500.0000), (0.0000, 1.0000)]
 
 def load_model():
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -24,7 +24,13 @@ def load_model():
     tokenizer.pad_token = tokenizer.eos_token
     tokenizer.add_special_tokens({"additional_special_tokens": ["<END>"]})
     END_ID = tokenizer.convert_tokens_to_ids("<END>")
-    model = GPT2LMHeadModel.from_pretrained(MODEL_DIR).to(device)
+    
+    config = AutoConfig.from_pretrained(MODEL_DIR)
+    config.vocab_size = len(tokenizer)
+
+    model = GPT2LMHeadModel.from_pretrained(MODEL_DIR, config=config, ignore_mismatched_sizes=True)
+    model.resize_token_embeddings(len(tokenizer))
+    model.to(device)
     model.eval()
     return tokenizer, model, device, END_ID
 
@@ -81,11 +87,11 @@ def read_pairs(path):
     return pairs
 
 def denorm4(vals_norm, scale):
-    c = vals_norm[0] * scale["CPU"]
-    m = vals_norm[1] * scale["MEM"]
-    d = vals_norm[2] * scale["DELAY"]
-    l = vals_norm[3] * scale["LOAD"]
-    return [c, m, d, l]
+    def _d(x,k):
+        a, b = scale[k]["min"], scale[k]["max"]
+        return x * (b - a) + a
+    c, m, d, l = vals_norm
+    return [_d(c, "CPU"), _d(m, "MEM"), _d(d, "DELAY"), _d(l, "LOAD")]
 
 def clamp4(xs):
     out = []

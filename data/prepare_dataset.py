@@ -2,12 +2,13 @@ import os
 import argparse
 from collections import defaultdict
 import json
+import random
 
 DEFAULT_SCALE = {
-    "CPU": 5.0,
-    "MEM": 16.0,
-    "DELAY": 500.0,
-    "LOAD": 1.0
+    "CPU": {"min": 1.0, "max": 5.0},
+    "MEM": {"min": 2.0, "max": 16.0},
+    "DELAY": {"min": 5.0, "max": 500.0},
+    "LOAD": {"min": 0.0, "max": 1.0}
 }
 
 def parse_line(line: str):
@@ -21,20 +22,29 @@ def parse_line(line: str):
         delay = float(parts[3])
         load = float(parts[4])
         return node_id, [cpu, mem, delay, load]
-    except Exception:
+    except:
         return None
 
-def norm4(v4, scale):
+def norm4(v4, scale=DEFAULT_SCALE):
+    def _n(x,k):
+        a, b = scale[k]["min"], scale[k]["max"]
+        if b <= a:
+            return 0.0
+        z = (x - a) / (b - a)
+        return max(0.0, min(1.0, z))
     c, m, d, l = v4
-    return [c/scale["CPU"], m/scale["MEM"], d/scale["DELAY"], l/scale["LOAD"]]
+    return [_n(c, "CPU"), _n(m, "MEM"), _n(d, "DELAY"), _n(l, "LOAD")]
 
 def denorm4(v4, scale):
+    def _d(x,k):
+        a, b = scale[k]["min"], scale[k]["max"]
+        return x * (b - a) + a
     c, m, d, l = v4
-    return [c*scale["CPU"], m*scale["MEM"], d*scale["DELAY"], l*scale["LOAD"]]
+    return [_d(c, "CPU"), _d(m, "MEM"), _d(d, "DELAY"), _d(l, "LOAD")]
 
 def fmt4(v4):
     c,m,d,l = v4
-    return f"CPU={c:.2f},MEM={m:.2f},DELAY={d:.2f},LOAD={l:.2f}"
+    return f"CPU={c:.6f},MEM={m:.6f},DELAY={d:.6f},LOAD={l:.6f}"
 
 def build_windows(series, W):
     out = []
@@ -43,35 +53,33 @@ def build_windows(series, W):
     for i in range(W, len(series)):
         hist = series[i-W:i]
         tgt = series[i]
-        # hist_flat = []
-        # for step in hist:
-        #     hist_flat.extend(step)
-        # hist_str = ",".join(f"{x:.2f}" for x in hist_flat)
-        # tgt_str = fmt4(tgt)
-        # out.append((hist_str, tgt_str))
-        out.append((hist, tgt))
+        hist_n = [x for step in hist for x in norm4(step)]
+        tgt_n = norm4(tgt)
+        out.append((hist_n, tgt_n))
     return out
 
-def oversample(line_pairs, delay_thr=0.35, load_thr=0.70, factor=3):
+def oversample(pairs, scale=DEFAULT_SCALE):
     boosted = []
-    for h, t in line_pairs:
-        d = t[2]
-        l = t[3]
-        times = factor if (d > delay_thr or l > load_thr) else 1
+    for hist_n, tgt_n in pairs:
+        c, m, d_ms, l_raw = denorm4(tgt_n, scale)
+        times = 1
+        if d_ms > 350 or l_raw > 0.7:
+            times = 3
+        elif (80 <= d_ms <= 200) or (0.3 <= l_raw <= 0.7):
+            times = 2
         for _ in range(times):
-            boosted.append((h, t))
+            boosted.append((hist_n, tgt_n))
     return boosted
 
 def main(args=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--input", type=str, default="data/node_logs.csv", help="原始日志文件,每行为: node_id,cpu,mem,delay,load")
     ap.add_argument("--output", type=str, default="data/training_data_cleaned.csv", help="处理后的输出文件(带<END>)")
+    ap.add_argument("--preview", default="data/training_data_preview.csv", help="预览输出文件地址")
     ap.add_argument("--scale", default="data/scale.json", help="归一化比例文件(JSON)，默认值为CPU=5.0,MEM=16.0,DELAY=500.0,LOAD=1.0")
     ap.add_argument("--window", type=int, default=10, help="历史窗口长度")
-    ap.add_argument("--delay_thr", type=float, default=70.0, help="过采样阈值：延迟(ms)")
-    ap.add_argument("--load_thr", type=float, default=0.70, help="过采样阈值：负载(rate)")
-    ap.add_argument("--factor", type=int, default=3, help="高难样本重复写入次数")
     ap.add_argument("--shuffle", action="store_true", help="是否打乱数据")
+    ap.add_argument("--preview_rows", type=int, default=300, help="预览输出的行数")
     if args is not None:
         args = ap.parse_args(args)
     else:
@@ -90,29 +98,49 @@ def main(args=None):
             groups[nid].append(vec4)
             n_raw += 1
 
-    scale = DEFAULT_SCALE
-    json.dump(scale, open(args.scale, "w"))
-
     all_pairs = []
     for nid, seq in groups.items():
-        seq_norm = [norm4(v4, scale) for v4 in seq]
-        all_pairs.extend(build_windows(seq_norm, args.window))
+        all_pairs.extend(build_windows(seq, args.window))
 
-    boosted = oversample(all_pairs, delay_thr=args.delay_thr, load_thr=args.load_thr, factor=args.factor)
+    boosted = oversample(all_pairs, DEFAULT_SCALE)
 
     if args.shuffle:
-        import random
         random.shuffle(boosted)
 
     with open(args.output, "w", encoding="utf-8") as f:
-        for hist, tgt in boosted:
-            history_str = " ; ".join(fmt4(h) for h in hist)
-            target_str = fmt4(tgt)
+        for hist_n, tgt_n in boosted:
+            steps = [hist_n[i:i+4] for i in range(0, len(hist_n), 4)]
+            history_str = " ; ".join(fmt4(s) for s in steps)
+            target_str = fmt4(tgt_n)
             f.write(f"{history_str} -> {target_str} <END>\n")
-    
+
+    with open(args.scale_json, "w", encoding="utf-8") as f:
+        json.dump(DEFAULT_SCALE, f, ensure_ascii=False, indent=2)
+
+    try:
+        import csv
+        k = min(args.preview_rows, len(boosted))
+        sample = boosted[:k]
+        with open(args.preview, "w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            header = ["idx"]
+            for t in range(args.window):
+                header += [f"h{t+1}_cpu","h{t+1}_mem","h{t+1}_delay","h{t+1}_load"]
+            header += ["y_cpu","y_mem","y_delay","y_load"]
+            w.writerow(header)
+            for i, (hist_n, tgt_n) in enumerate(sample):
+                steps = [hist_n[j:j+4] for j in range(0, len(hist_n), 4)]
+                row = [i]
+                for s in steps:
+                    row += [f"{v:.4f}" for v in denorm4(s, DEFAULT_SCALE)]
+                row += [f"{v:.4f}" for v in denorm4(tgt_n, DEFAULT_SCALE)]
+                w.writerow(row)
+    except Exception as e:
+        print(f"[preview] skip writing preview due to: {e}")
+
     print(f"raw_lines={n_raw}, nodes={len(groups)},"
-          f" windows={len(all_pairs)}, boosted={len(boosted)},"
-          f" window_size={args.window}, output='{args.output}', scale='{args.scale}'")
+          f" windows={len(all_pairs)}, boosted={len(boosted)}, window_size={args.window},"
+          f" output='{args.output}', preview='{args.preview}', scale='{args.scale}'")
 
 if __name__ == "__main__":
     import sys
