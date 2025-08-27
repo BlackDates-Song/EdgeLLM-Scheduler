@@ -7,11 +7,11 @@ import matplotlib.pyplot as plt
 from transformers import GPT2LMHeadModel, GPT2Tokenizer, AutoConfig
 
 MODEL_DIR = "model_output"
-DATA_FILE = "data/training_data_cleaned.txt"
+DATA_FILE = "result/training_data_cleaned.txt"
 SCALE_JSON = "data/scale.json"
-OUT_CSV = "data/pred_vs_gt_multi.csv"
-PLOT_ERR = "data/multi_error_hist.png"
-PLOT_LINE = "data/multi_pred_vs_gt.png"
+OUT_CSV = "result/pred_vs_gt_multi.csv"
+PLOT_ERR = "result/multi_error_hist.png"
+PLOT_LINE = "result/multi_pred_vs_gt.png"
 
 _PAIR = re.compile(r'(CPU|MEM|DELAY|LOAD)\s*=\s*([-+]?\d+(?:\.\d+)?)', re.I)
 _NUM = re.compile(r'[-+]?\d+(?:\.\d+)?')
@@ -68,11 +68,13 @@ def predict_next_state(history_str, tokenizer, model, device, END_ID):
             max_new_tokens=48,
             do_sample=False,
             no_repeat_ngram_size=3,
+            repetition_penalty=1.2,
             eos_token_id=END_ID,
             pad_token_id=tokenizer.eos_token_id
         )
     decoded = tokenizer.decode(outputs[0], skip_special_tokens=True)
-    after = decoded.split("->", 1)[1] if "->" in decoded else decoded
+    after = decoded.split("<END>")[0]
+    after = after.split("->", 1)[1] if "->" in after else after
     return extract_first_four(after)
 
 def read_pairs(path):

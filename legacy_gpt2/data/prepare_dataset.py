@@ -35,7 +35,7 @@ def norm4(v4, scale=DEFAULT_SCALE):
     c, m, d, l = v4
     return [_n(c, "CPU"), _n(m, "MEM"), _n(d, "DELAY"), _n(l, "LOAD")]
 
-def denorm4(v4, scale):
+def denorm4(v4, scale=DEFAULT_SCALE):
     def _d(x,k):
         a, b = scale[k]["min"], scale[k]["max"]
         return x * (b - a) + a
@@ -54,37 +54,54 @@ def build_windows(series, W):
         hist = series[i-W:i]
         tgt = series[i]
         hist_n = [x for step in hist for x in norm4(step)]
-        tgt_n = norm4(tgt)
-        out.append((hist_n, tgt_n))
+        out.append((hist_n, tgt))
     return out
 
-def oversample(pairs, scale=DEFAULT_SCALE):
+def smooth_tgt(tgt):
+    c, m, d, l = tgt
+    if abs(l - 0.0) < 1e-8:
+        l = 0.01
+    if abs(l - 1.0) < 1e-8:
+        l = 0.99
+    if d < 10.0:
+        d = max(5.0, min(500.0, d + random.uniform(-2.0, 2.0)))
+    return [c, m, d, l]
+
+def oversample(pairs, scale=DEFAULT_SCALE, downsample_extreme_load=True):
     boosted = []
     for hist_n, tgt_n in pairs:
-        c, m, d_ms, l_raw = denorm4(tgt_n, scale)
+        tgt_sm = smooth_tgt(tgt_n)
+        _, _, d_ms, l_raw = tgt_sm
         times = 1
-        if d_ms > 350 or l_raw > 0.7:
-            times = 3
-        elif (80 <= d_ms <= 200) or (0.3 <= l_raw <= 0.7):
-            times = 2
+        if d_ms > 300:
+            times = 8
+        elif 100 <= d_ms <= 300:
+            times = 6
+        if 0.3 <= l_raw <= 0.7:
+            times = min(8, times + 2)
+        if downsample_extreme_load and (abs(l_raw - 0.0) < 1e-8 or abs(l_raw - 1.0) < 1e-8):
+            if random.random() < 0.7:
+                continue
         for _ in range(times):
             boosted.append((hist_n, tgt_n))
     return boosted
 
 def main(args=None):
     ap = argparse.ArgumentParser()
-    ap.add_argument("--input", type=str, default="data/node_logs.csv", help="原始日志文件,每行为: node_id,cpu,mem,delay,load")
-    ap.add_argument("--output", type=str, default="data/training_data_cleaned.csv", help="处理后的输出文件(带<END>)")
-    ap.add_argument("--preview", default="data/training_data_preview.csv", help="预览输出文件地址")
+    ap.add_argument("--input", type=str, default="result/node_logs.csv", help="原始日志文件,每行为: node_id,cpu,mem,delay,load")
+    ap.add_argument("--output", type=str, default="result/training_data_cleaned.csv", help="处理后的输出文件(带<END>)")
+    ap.add_argument("--preview", default="result/training_data_preview.csv", help="预览输出文件地址")
     ap.add_argument("--scale", default="data/scale.json", help="归一化比例文件(JSON)，默认值为CPU=5.0,MEM=16.0,DELAY=500.0,LOAD=1.0")
     ap.add_argument("--window", type=int, default=10, help="历史窗口长度")
     ap.add_argument("--shuffle", action="store_true", help="是否打乱数据")
+    ap.add_argument("--seed", type=int, default=42, help="随机种子")
     ap.add_argument("--preview_rows", type=int, default=300, help="预览输出的行数")
     if args is not None:
         args = ap.parse_args(args)
     else:
         args = ap.parse_args()
 
+    random.seed(args.seed)
     os.makedirs(os.path.dirname(args.output), exist_ok=True)
 
     groups = defaultdict(list)
@@ -102,19 +119,20 @@ def main(args=None):
     for nid, seq in groups.items():
         all_pairs.extend(build_windows(seq, args.window))
 
-    boosted = oversample(all_pairs, DEFAULT_SCALE)
+    boosted = oversample(all_pairs, DEFAULT_SCALE, downsample_extreme_load=True)
 
     if args.shuffle:
         random.shuffle(boosted)
 
     with open(args.output, "w", encoding="utf-8") as f:
-        for hist_n, tgt_n in boosted:
+        for hist_n, tgt_sm in boosted:
+            tgt_n = norm4(tgt_sm)
             steps = [hist_n[i:i+4] for i in range(0, len(hist_n), 4)]
             history_str = " ; ".join(fmt4(s) for s in steps)
             target_str = fmt4(tgt_n)
             f.write(f"{history_str} -> {target_str} <END>\n")
 
-    with open(args.scale_json, "w", encoding="utf-8") as f:
+    with open(args.scale, "w", encoding="utf-8") as f:
         json.dump(DEFAULT_SCALE, f, ensure_ascii=False, indent=2)
 
     try:
@@ -132,8 +150,8 @@ def main(args=None):
                 steps = [hist_n[j:j+4] for j in range(0, len(hist_n), 4)]
                 row = [i]
                 for s in steps:
-                    row += [f"{v:.4f}" for v in denorm4(s, DEFAULT_SCALE)]
-                row += [f"{v:.4f}" for v in denorm4(tgt_n, DEFAULT_SCALE)]
+                    row += [f"{v:.4f}" for v in denorm4(s)]
+                row += [f"{v:.4f}" for v in tgt_n]
                 w.writerow(row)
     except Exception as e:
         print(f"[preview] skip writing preview due to: {e}")

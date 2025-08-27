@@ -1,6 +1,3 @@
 model_output/
-data/*.csv
-data/*.txt
-data/*.png
-_pycache_/
+__pycache__/
 **/__pycache__/
