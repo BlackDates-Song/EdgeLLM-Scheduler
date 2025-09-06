@@ -118,7 +118,7 @@ def mae_rmse(gt, pred):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--input", default="data/node_logs.txt", help="原始日志：node_id,cpu,mem,delay,load")
+    ap.add_argument("--input", default="results/node_logs.txt", help="原始日志：node_id,cpu,mem,delay,load")
     ap.add_argument("--window", type=int, default=10)
     ap.add_argument("--batch_size", type=int, default=64)
     ap.add_argument("--epochs", type=int, default=20)
@@ -128,7 +128,7 @@ def main():
     ap.add_argument("--dropout", type=float, default=0.1)
     ap.add_argument("--val_ratio", type=float, default=0.2, help="每个node按时间后20%做验证")
     ap.add_argument("--seed", type=int, default=42)
-    ap.add_argument("--out_csv", default="data/pred_vs_gt_lstm.csv")
+    ap.add_argument("--out_csv", default="results/pred_vs_gt_lstm.csv")
     ap.add_argument("--no_cuda", action="store_true")
     ap.add_argument("--log_delay", action="store_true", help="对 delay 使用 log1p 归一化")
     args = ap.parse_args()
@@ -205,7 +205,7 @@ def main():
         if val_loss < best_val - 1e-6:
             best_val = val_loss
             bad = 0
-            torch.save(model.state_dict(), "data/lstm_best.pt")
+            torch.save(model.state_dict(), "model_output/lstm_best.pt")
         else:
             bad += 1
             if bad >= patience:
