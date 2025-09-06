@@ -51,6 +51,7 @@ def stage_train_transformer(args):
         "--ffn", str(args.ffn),
         "--dropout", str(args.dropout),
         "--delay_weight", str(args.delay_weight),
+        "--grad_clip", str(args.grad_clip),
     ]
     if args.log_delay:
         cmd.append("--log_delay")
@@ -58,6 +59,8 @@ def stage_train_transformer(args):
         cmd.append("--use_delta")
     if args.no_cuda:
         cmd.append("--no_cuda")
+    if args.huber_delay:
+        cmd.append("--huber_delay")
     run(cmd)
 
 def main():
@@ -96,6 +99,8 @@ def main():
     ap.add_argument("--dropout", type=float, default=0.1)
     ap.add_argument("--use_delta", action="store_true")
     ap.add_argument("--delay_weight", type=float, default=3.0)
+    ap.add_argument("--huber_delay", action="store_true")
+    ap.add_argument("--grad_clip", type=float, default=0.0)
     args = ap.parse_args()
 
     if args.stage == "gen_logs":

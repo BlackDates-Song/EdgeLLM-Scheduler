@@ -10,10 +10,13 @@ This project is to build a simulation system that includes multiple edge nodes (
 1) Prepare logs: 
    run `python main.py --stage gen_logs --num_nodes 10 --steps 1000 --interval 0.02` 
    get `results/node_logs.txt` with rows `node_id,cpu,mem,delay,load`
+
 2) LSTM:
    python main.py --stage train_lstm --input results/node_logs.txt --window 20 --epochs 40 --batch_size 64 --hidden 256 --layers 2 --log_delay
+
 3) Transformer:
-   python main.py --stage train_transformer --input results/node_logs.txt --window 30 --epochs 40 --batch_size 64 --d_model 128 --nhead 4 --t_layers 3 --ffn 256 --dropout 0.1 --log_delay --use_delta
+   python main.py --stage train_transformer --input results/node_logs.txt --window 30 --epochs 40 --batch_size 64 --d_model 128 --nhead 4 --layers 3 --ffn 256 --dropout 0.1 --log_delay --delay_weight 5.0 --huber_delay --grad_clip 1.0 --lr 3e-4
+
 4) Results:
    CSVs under results/, best weights under model_output/
       lstm_best.pt / ts_transformer_best.pt.

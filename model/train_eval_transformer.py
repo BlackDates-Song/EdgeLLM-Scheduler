@@ -144,6 +144,8 @@ def main():
     parser.add_argument("--log_delay", action="store_true")
     parser.add_argument("--use_delta", action="store_true")
     parser.add_argument("--delay_weight", type=float, default=3.0, help="加权MSE中Delay的权重")
+    parser.add_argument("--huber_delay", action="store_true", help="仅对 Delay 维使用 Huber(SmoothL1) 损失")
+    parser.add_argument("--grad_clip", type=float, default=0.0, help=">0 时启用梯度裁剪（max_norm）")
     parser.add_argument("--no_cuda", action="store_true")
     args = parser.parse_args()
 
@@ -186,7 +188,8 @@ def main():
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr)
 
     base_weights = torch.tensor([1.0, 1.0, args.delay_weight, 1.0], device=device)
-    loss_fn = nn.MSELoss(reduction="none")
+    mse_fn = nn.MSELoss(reduction="none")
+    huber_fn = nn.SmoothL1Loss(reduction="none")
 
     best = float("inf")
     patience = 6
@@ -199,10 +202,19 @@ def main():
             Hn = Hn.to(device)
             Yn = Yn.to(device)
             pr = model(Hn)
-            mse = loss_fn(pr, Yn)
-            loss = (mse * base_weights).mean()
+            if args.huber_delay:
+                mse = mse_fn(pr, Yn)
+                hub = huber_fn(pr, Yn)
+                w_mse = torch.tensor([1.0, 1.0, 0.0, 1.0], device=device)
+                w_hub = torch.tensor([0.0, 0.0, args.delay_weight, 0.0], device=device)
+                loss = (mse * w_mse + hub * w_hub).mean()
+            else:
+                mse = mse_fn(pr, Yn)
+                loss = (mse * base_weights).mean()
             opt.zero_grad()
             loss.backward()
+            if args.grad_clip and args.grad_clip > 0.0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=args.grad_clip)
             opt.step()
             tr_loss += loss.item() * Hn.size(0)
         tr_loss /= len(tr_loader.dataset)
@@ -215,8 +227,15 @@ def main():
                 Hn = Hn.to(device)
                 Yn = Yn.to(device)
                 pr = model(Hn)
-                mse = loss_fn(pr, Yn)
-                loss = (mse * base_weights).mean()
+                if args.huber_delay:
+                    mse = mse_fn(pr, Yn)
+                    hub = huber_fn(pr, Yn)
+                    w_mse = torch.tensor([1.0, 1.0, 0.0, 1.0], device=device)
+                    w_hub = torch.tensor([0.0, 0.0, args.delay_weight, 0.0], device=device)
+                    loss = (mse * w_mse + hub * w_hub).mean()
+                else:
+                    mse = mse_fn(pr, Yn)
+                    loss = (mse * base_weights).mean()
                 va_loss += loss.item() * Hn.size(0)
         va_loss /= (len(va_loader.dataset) if len(va_loader.dataset) > 0 else 1)
         print(f"[Epoch {ep:02d}] train_wmse={tr_loss:.6f}  val_wmse={va_loss:.6f}")
@@ -224,6 +243,7 @@ def main():
         if va_loss < best - 1e-6:
             best = va_loss
             bad = 0
+            os.makedirs("model_output", exist_ok=True)
             torch.save(model.state_dict(), "model_output/ts_transformer_best.pt")
         else:
             bad += 1
