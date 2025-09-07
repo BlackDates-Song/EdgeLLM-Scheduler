@@ -21,5 +21,11 @@ This project is to build a simulation system that includes multiple edge nodes (
    CSVs under results/, best weights under model_output/
       lstm_best.pt / ts_transformer_best.pt.
 
+5) Infer:
+   One step infer (node 0):
+      python main.py --stage infer_transformer --node_id 0 --window 30 --steps_ahead 1 --log_delay
+   Multi-steps infer (node 3, 5 steps):
+      python main.py --stage infer_transformer --node_id 3 --window 30 --steps_ahead 5 --log_delay
+
 Legacy (GPT-2, archived)
 See legacy_gpt2/ (not maintained).
