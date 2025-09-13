@@ -53,6 +53,7 @@ def stage_train_transformer(args):
         "--delay_weight", str(args.delay_weight),
         "--grad_clip", str(args.grad_clip),
         "--lr", str(args.lr),
+        "--num_nodes", str(args.num_nodes),
     ]
     if args.log_delay:
         cmd.append("--log_delay")
@@ -155,6 +156,7 @@ def main():
     ap.add_argument("--huber_delay", action="store_true")
     ap.add_argument("--grad_clip", type=float, default=0.0)
     ap.add_argument("--lr", type=float, default=3e-4)
+    ap.add_argument("--num_nodes", type=int, default=5)
     # ------ Transformer 推理参数 ------
     ap.add_argument("--ckpt", default="model_output/ts_transformer_best.pt")
     ap.add_argument("--source", default="results/node_logs.csv", help="优先用CSV；若不存在再尝试TXT")

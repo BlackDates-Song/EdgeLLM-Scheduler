@@ -58,7 +58,7 @@ def parse_line(line):
     except:
         return None
     
-def build_windows(series, window, use_delta=False):
+def build_windows_per_node(series, window, node_idx, use_delta=False):
     out = []
     if len(series) <= window:
         return out
@@ -81,7 +81,7 @@ def build_windows(series, window, use_delta=False):
             diff_n = np.stack([n4d(x) for x in diff_win], axis=0)
             hist_n = np.concatenate([hist_n, diff_n], axis=1)
         tgt_n = norm4(tgt_raw)
-        out.append((hist_n, tgt_n, hist_raw, tgt_raw))
+        out.append((hist_n, tgt_n, hist_raw, tgt_raw, node_idx))
     return out
 
 class SeqDataset(Dataset):
@@ -90,9 +90,9 @@ class SeqDataset(Dataset):
     def __len__(self):
         return len(self.samples)
     def __getitem__(self, idx):
-        Hn, Yn, Hr, Yr = self.samples[idx]
-        return torch.from_numpy(Hn), torch.from_numpy(Yn), torch.from_numpy(Hr), torch.from_numpy(Yr)
-    
+        Hn, Yn, Hr, Yr, NID = self.samples[idx]
+        return torch.from_numpy(Hn), torch.from_numpy(Yn), torch.from_numpy(Hr), torch.from_numpy(Yr), NID
+
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model, max_len=4096):
         super().__init__()
@@ -107,20 +107,23 @@ class PositionalEncoding(nn.Module):
         return x + self.pe[:, :L, :]
     
 class TS_Transformer(nn.Module):
-    def __init__(self, input_dim=4, d_model=128, nhead=4, num_layers=3, dim_ff=256, dropout=0.1):
+    def __init__(self, input_dim=4, num_nodes=5, d_model=128, nhead=4, num_layers=3, dim_ff=256, dropout=0.1):
         super().__init__()
+        self.node_embedding = nn.Embedding(num_embeddings=num_nodes, embedding_dim=d_model)
         self.in_proj = nn.Linear(input_dim, d_model)
         enc_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead, dim_feedforward=dim_ff, dropout=dropout, batch_first=True)
         self.encoder = nn.TransformerEncoder(enc_layer, num_layers=num_layers)
         self.pe = PositionalEncoding(d_model)
         self.head = nn.Sequential(nn.Linear(d_model, d_model), nn.ReLU(), nn.Linear(d_model, 4))
-    def forward(self, x):
+    def forward(self, x, node_ids):
+        node_emb = self.node_embedding(node_ids)
         h = self.in_proj(x)
         h = self.pe(h)
         h = self.encoder(h)
         last = h[:, -1, :]
-        return self.head(last)
-    
+        combined = torch.cat([last, node_emb], dim=1)
+        return self.head(combined)
+
 def mae_rmse(gt, pred):
     mae = np.mean(np.abs(pred - gt), axis=0)
     rmse = np.sqrt(np.mean((pred - gt) ** 2, axis=0))
@@ -147,11 +150,12 @@ def main():
     parser.add_argument("--huber_delay", action="store_true", help="仅对 Delay 维使用 Huber(SmoothL1) 损失")
     parser.add_argument("--grad_clip", type=float, default=0.0, help=">0 时启用梯度裁剪（max_norm）")
     parser.add_argument("--no_cuda", action="store_true")
+    parser.add_argument("--num_nodes", type=int, default=5, help="节点总数（用于Embedding）")
     args = parser.parse_args()
 
     global LOG_DELAY
     LOG_DELAY = args.log_delay
-    print(f"[Info] LOG_DELAY = {LOG_DELAY}, USE_DELTA = {args.use_delta}")
+    print(f"[Info] LOG_DELAY = {LOG_DELAY}, USE_DELTA = {args.use_delta}, HUBER_DELAY = {args.huber_delay}")
 
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -168,10 +172,15 @@ def main():
             nid, v = p
             groups[nid].append(v)
 
+    node_id_map = {
+        node_id: i for i, node_id in enumerate(sorted(groups.keys()))
+    }
+
     train, val = [], []
     total = 0
     for nid, seq in groups.items():
-        pairs = build_windows(seq, args.window, use_delta=args.use_delta)
+        node_idx = node_id_map[nid]
+        pairs = build_windows_per_node(seq, args.window, node_idx, use_delta=args.use_delta)
         total += len(pairs)
         if not pairs: 
             continue
@@ -184,7 +193,7 @@ def main():
     va_loader = DataLoader(SeqDataset(val), batch_size=args.batch_size, shuffle=False)
 
     in_dim = train[0][0].shape[1] if len(train) > 0 else (8 if args.use_delta else 4)
-    model = TS_Transformer(input_dim=in_dim, d_model=args.d_model, nhead=args.nhead, num_layers=args.layers, dim_ff=args.ffn, dropout=args.dropout).to(device)
+    model = TS_Transformer(input_dim=in_dim, num_nodes=args.num_nodes, d_model=args.d_model, nhead=args.nhead, num_layers=args.layers, dim_ff=args.ffn, dropout=args.dropout).to(device)
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr)
 
     base_weights = torch.tensor([1.0, 1.0, args.delay_weight, 1.0], device=device)
@@ -194,14 +203,17 @@ def main():
     best = float("inf")
     patience = 6
     bad = 0
+    os.makedirs("model_output", exist_ok=True)
+    ckpt_path = "model_output/ts_transformer_best.pt"
     for ep in range(1, args.epochs + 1):
         # ---- train ----
         model.train()
         tr_loss = 0.0
-        for Hn, Yn, _, _ in tr_loader:
+        for Hn, Yn, _, _, NIDs in tr_loader:
             Hn = Hn.to(device)
             Yn = Yn.to(device)
-            pr = model(Hn)
+            NIDs = NIDs.to(device)
+            pr = model(Hn, NIDs)
             if args.huber_delay:
                 mse = mse_fn(pr, Yn)
                 hub = huber_fn(pr, Yn)
@@ -223,10 +235,11 @@ def main():
         model.eval()
         va_loss = 0.0
         with torch.no_grad():
-            for Hn, Yn, _, _ in va_loader:
+            for Hn, Yn, _, _, NIDs in va_loader:
                 Hn = Hn.to(device)
                 Yn = Yn.to(device)
-                pr = model(Hn)
+                NIDs = NIDs.to(device)
+                pr = model(Hn, NIDs)
                 if args.huber_delay:
                     mse = mse_fn(pr, Yn)
                     hub = huber_fn(pr, Yn)
@@ -243,31 +256,31 @@ def main():
         if va_loss < best - 1e-6:
             best = va_loss
             bad = 0
-            os.makedirs("model_output", exist_ok=True)
-            torch.save(model.state_dict(), "model_output/ts_transformer_best.pt")
+            torch.save(model.state_dict(), ckpt_path)
         else:
             bad += 1
             if bad >= patience:
                 print(f"[EarlyStop] no improvement for {patience} epochs.")
                 break
     
-    if os.path.exists("model_output/ts_transformer_best.pt"):
-        model.load_state_dict(torch.load("model_output/ts_transformer_best.pt", map_location=device))
+    if os.path.exists(ckpt_path):
+        model.load_state_dict(torch.load(ckpt_path, map_location=device))
         model.eval()
 
     gts, preds = [], []
     rows = []
     with torch.no_grad():
-        for Hn, Yn, Hr, Yr in va_loader:
+        for Hn, Yn, Hr, Yr, NIDs in va_loader:
             Hn = Hn.to(device)
-            pr_n = model(Hn).cpu().numpy()
+            NIDs = NIDs.to(device)
+            pr_n = model(Hn, NIDs).cpu().numpy()
             gt_n = Yn.numpy()
             pr = np.stack([denorm4(p) for p in pr_n], axis=0)
             gt = np.stack([denorm4(g) for g in gt_n], axis=0)
-            gts.append(gt); preds.append(pr)
+            gts.append(gt)
+            preds.append(pr)
             for i in range(pr.shape[0]):
                 rows.append([gt[i,0],gt[i,1],gt[i,2],gt[i,3],pr[i,0],pr[i,1],pr[i,2],pr[i,3]])
-
     if len(rows) > 0:
         gts = np.concatenate(gts,axis=0)
         preds=np.concatenate(preds,axis=0)
