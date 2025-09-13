@@ -101,8 +101,14 @@ def stage_simulate(args):
         "--alpha", str(args.alpha),
         "--beta", str(args.beta),
         "--margin_ms", str(args.margin_ms),
+        "--fair_gamma", str(args.fair_gamma),
+        "--fair_scale_ms", str(args.fair_scale_ms),
+        "--fair_window", str(args.fair_window),
+        "--cooldown_k", str(args.cooldown_k),
+        "--cooldown_ms", str(args.cooldown_ms),
         "--top_k", str(args.top_k),
         "--epsilon", str(args.epsilon),
+        "--safety_threshold_ms", str(args.safety_threshold_ms),
     ]
     if args.log_delay:
         cmd.append("--log_delay")
@@ -160,8 +166,14 @@ def main():
     ap.add_argument("--alpha", type=float, default=1.0, help="网络延迟权重")
     ap.add_argument("--beta", type=float, default=1.0, help="计算时间权重")
     ap.add_argument("--margin_ms", type=float, default=14.0) 
+    ap.add_argument("--fair_gamma", type=float, default=1.0)
+    ap.add_argument("--fair_scale_ms", type=float, default=25.0)
+    ap.add_argument("--fair_window", type=int, default=20)
+    ap.add_argument("--cooldown_k", type=int, default=2)
+    ap.add_argument("--cooldown_ms", type=float, default=4.0)
     ap.add_argument("--top_k", type=int, default=2)
     ap.add_argument("--epsilon", type=float, default=0.2)
+    ap.add_argument("--safety_threshold_ms", type=float, default=5.0)
 
     args = ap.parse_args()
 
