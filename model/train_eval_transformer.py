@@ -114,7 +114,7 @@ class TS_Transformer(nn.Module):
         enc_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead, dim_feedforward=dim_ff, dropout=dropout, batch_first=True)
         self.encoder = nn.TransformerEncoder(enc_layer, num_layers=num_layers)
         self.pe = PositionalEncoding(d_model)
-        self.head = nn.Sequential(nn.Linear(d_model, d_model), nn.ReLU(), nn.Linear(d_model, 4))
+        self.head = nn.Sequential(nn.Linear(d_model*2, d_model), nn.ReLU(), nn.Linear(d_model, 4))
     def forward(self, x, node_ids):
         node_emb = self.node_embedding(node_ids)
         h = self.in_proj(x)

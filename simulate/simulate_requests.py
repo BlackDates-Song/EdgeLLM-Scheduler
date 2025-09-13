@@ -7,9 +7,8 @@ import random
 import numpy as np
 import torch
 from torch import nn
-from collections import deque
+from collections import deque, defaultdict
 import sys
-# 确保能找到 policy 模块
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from policy.scheduler import pick_node, Weights, estimate_eta
 
@@ -50,7 +49,6 @@ def denorm4(z4):
         return x * (b - a) + a
     return np.array([_d(z4[0], "CPU"), _d(z4[1], "MEMORY"), _denorm_delay(z4[2]), _d(z4[3], "LOAD")], dtype=np.float32)
 
-# --- 模型定义 (与训练脚本保持一致) ---
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model, max_len=4096):
         super().__init__()
@@ -64,26 +62,30 @@ class PositionalEncoding(nn.Module):
         return x + self.pe[:, :L, :]
     
 class TS_Transformer(nn.Module):
-    def __init__(self,input_dim=4,d_model=128,nhead=4,num_layers=3,dim_ff=256,dropout=0.1):
+    def __init__(self, input_dim=4, num_nodes=5, d_model=128, nhead=4, num_layers=3, dim_ff=256, dropout=0.1):
         super().__init__()
-        self.in_proj=nn.Linear(input_dim,d_model)
-        enc=nn.TransformerEncoderLayer(d_model=d_model,nhead=nhead,dim_feedforward=dim_ff,dropout=dropout,batch_first=True)
-        self.encoder=nn.TransformerEncoder(enc,num_layers=num_layers)
-        self.pe=PositionalEncoding(d_model)
-        self.head=nn.Sequential(nn.Linear(d_model,d_model), nn.ReLU(), nn.Linear(d_model,4))
-    def forward(self, x):
+        self.node_embedding = nn.Embedding(num_embeddings=num_nodes, embedding_dim=d_model)
+        self.in_proj = nn.Linear(input_dim, d_model)
+        enc_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead, dim_feedforward=dim_ff, dropout=dropout, batch_first=True)
+        self.encoder = nn.TransformerEncoder(enc_layer, num_layers=num_layers)
+        self.pe = PositionalEncoding(d_model)
+        self.head = nn.Sequential(nn.Linear(d_model * 2, d_model), nn.ReLU(), nn.Linear(d_model, 4))
+
+    def forward(self, x, node_ids):
+        node_emb = self.node_embedding(node_ids)
         h = self.in_proj(x)
         h = self.pe(h)
         h = self.encoder(h)
-        last = h[:, -1, :]
-        return self.head(last)
-    
+        last_hidden_state = h[:, -1, :]
+        combined = torch.cat([last_hidden_state, node_emb], dim=1)
+        return self.head(combined)
+
 def read_csv_grouped(path):
-    groups={}
+    groups=defaultdict(list)
     with open(path,"r",encoding="utf-8") as f:
         r=csv.reader(f)
         for row in r:
-            if len(row)<5: 
+            if len(row)<5:
                 continue
             try:
                 nid=int(row[0])
@@ -93,11 +95,12 @@ def read_csv_grouped(path):
                 continue
     return groups
 
-def predict_one_step(model, device, hist):
+def predict_one_step(model, device, hist, node_idx):
     x_n = np.stack([norm4(x) for x in hist], axis=0)
     x_t = torch.from_numpy(x_n).unsqueeze(0).to(device)
+    node_idx_t = torch.tensor([node_idx], dtype=torch.long).to(device)
     with torch.no_grad():
-        y_n = model(x_t).cpu().numpy()[0]
+        y_n = model(x_t, node_idx_t).cpu().numpy()[0]
     return denorm4(y_n)
 
 def main():
@@ -127,6 +130,7 @@ def main():
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--no_cuda", action="store_true")
     ap.add_argument("--out_csv", default="results/sim_results.csv")
+    ap.add_argument("--num_nodes", type=int, default=5, help="Total number of unique nodes.")
     args = ap.parse_args()
 
     global LOG_DELAY
@@ -139,12 +143,13 @@ def main():
 
     groups = read_csv_grouped(args.source)
     node_ids = sorted(groups.keys())
+    node_id_map = {node_id: i for i, node_id in enumerate(node_ids)}
 
     for nid in node_ids:
         if len(groups[nid]) < args.window + 1:
             raise ValueError(f"节点 {nid} 的数据不足: {len(groups[nid])} < {args.window + 1}")
         
-    model = TS_Transformer(input_dim=4, d_model=args.d_model, nhead=args.nhead, num_layers=args.layers, dim_ff=args.ffn, dropout=args.dropout).to(device)
+    model = TS_Transformer(input_dim=4, num_nodes=args.num_nodes, d_model=args.d_model, nhead=args.nhead, num_layers=args.layers, dim_ff=args.ffn, dropout=args.dropout).to(device)
     state = torch.load(args.ckpt, map_location=device)
     model.load_state_dict(state)
     model.eval()
@@ -154,7 +159,6 @@ def main():
 
     w = Weights(alpha=args.alpha, beta=args.beta, margin_ms=args.margin_ms)
 
-    # 初始化统计和均衡策略的状态
     eta_real_list = []
     assign_cnt = {nid: 0 for nid in node_ids}
     deadline_miss = 0
@@ -167,29 +171,19 @@ def main():
         wr = csv.writer(f)
         wr.writerow(["step", "chosen_node", "eta_pred", "eta_real"])
         for step in range(1, args.steps + 1):
-            preds = {nid: predict_one_step(model, device, hist[nid]) for nid in node_ids}
+            preds = {nid: predict_one_step(model, device, hist[nid], node_id_map[nid]) for nid in node_ids}
 
-            # 计算包含均衡惩罚的最终分数
             final_scores = {}
             for nid, pred in preds.items():
                 eta = estimate_eta(pred, req_cost=args.req_cost, w=w)
-                
                 ra = recent_assign[nid]
                 recent_ratio = (sum(ra) / max(1, len(ra))) if len(ra) > 0 else 0.0
                 fair_ms = args.fair_gamma * recent_ratio * args.fair_scale_ms
                 cd_ms = args.cooldown_ms * cooldown_left[nid]
-                
                 final_scores[nid] = eta + fair_ms + cd_ms
 
-            # *** 使用新的pick_node函数进行决策 ***
-            best_node = pick_node(
-                final_scores, 
-                top_k=args.top_k, 
-                epsilon=args.epsilon,
-                threshold_ms=args.safety_threshold_ms
-            )
+            best_node = pick_node(final_scores, top_k=args.top_k, epsilon=args.epsilon, threshold_ms=args.safety_threshold_ms)
             
-            # 使用真实世界的下一步状态来评估和推进模拟
             real_eta = None
             for nid in node_ids:
                 idx = min(t_ptr[nid], len(groups[nid]) - 1)
@@ -202,33 +196,24 @@ def main():
                     comp_real = args.req_cost / max(1e-3, r_cpu * (1.0 - r_load))
                     real_eta = args.alpha * r_delay + args.beta * comp_real
 
-            # 更新均衡策略的状态
             for nid in node_ids:
-                if cooldown_left[nid] > 0:
+                if cooldown_left[nid] > 0: 
                     cooldown_left[nid] -= 1
             cooldown_left[best_node] = args.cooldown_k
             for nid in node_ids:
                 recent_assign[nid].append(1 if nid == best_node else 0)
             
-            # 更新统计数据
             assign_cnt[best_node] += 1
             eta_real_list.append(real_eta)
-            if real_eta > deadline_ms:
+            if real_eta > deadline_ms: 
                 deadline_miss += 1
-
             wr.writerow([step, best_node, f"{final_scores[best_node]:.3f}", f"{real_eta:.3f}"])
 
-    # --- 最终总结 ---
     def mean(xs): return float(np.mean(xs)) if xs else 0.0
     def p95(xs): return float(np.percentile(xs, 95)) if xs else 0.0
     miss_ratio = deadline_miss / max(1, args.steps)
     imbalance = np.std(list(assign_cnt.values()))
-
-    print(f"[Sim Summary] steps={args.steps}, "
-          f"avg_eta(real)={mean(eta_real_list):.2f} ms, "
-          f"p95_eta(real)={p95(eta_real_list):.2f} ms, "
-          f"miss_ratio={miss_ratio:.3f}, "
-          f"imbalance_std={imbalance:.2f}")
+    print(f"[Sim Summary] steps={args.steps}, avg_eta(real)={mean(eta_real_list):.2f} ms, p95_eta(real)={p95(eta_real_list):.2f} ms, miss_ratio={miss_ratio:.3f}, imbalance_std={imbalance:.2f}")
     print(f"[Saved] {args.out_csv}")
 
 if __name__ == "__main__":
