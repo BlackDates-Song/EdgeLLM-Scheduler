@@ -85,9 +85,34 @@ def stage_infer_transformer(args):
         cmd.append("--no_cuda")
     run(cmd)
 
+def stage_simulate(args):
+    cmd = [
+        sys.executable, "simulate/simulate_requests.py",
+        "--source", args.source,
+        "--ckpt", args.ckpt,
+        "--window", str(args.window),
+        "--steps", str(args.steps),
+        "--d_model", str(args.d_model),
+        "--nhead", str(args.nhead),
+        "--layers", str(args.TS_layers),
+        "--ffn", str(args.ffn),
+        "--dropout", str(args.dropout),
+        "--req_cost", str(args.req_cost),
+        "--alpha", str(args.alpha),
+        "--beta", str(args.beta),
+        "--margin_ms", str(args.margin_ms),
+        "--top_k", str(args.top_k),
+        "--epsilon", str(args.epsilon),
+    ]
+    if args.log_delay:
+        cmd.append("--log_delay")
+    if args.no_cuda:
+        cmd.append("--no_cuda")
+    run(cmd)
+
 def main():
     ap = argparse.ArgumentParser("EdgeLLM Scheduler - unified entry")
-    ap.add_argument("--stage", required=True, choices=["gen_logs", "train_lstm", "train_transformer", "infer_transformer"], help="选择要执行的阶段")
+    ap.add_argument("--stage", required=True, choices=["gen_logs", "train_lstm", "train_transformer", "infer_transformer", "simulate"], help="选择要执行的阶段")
 
     # ------ gen_logs 参数 ------
     ap.add_argument("--out_txt", default="results/node_logs.txt")
@@ -130,6 +155,14 @@ def main():
     ap.add_argument("--txt_fallback", default="results/node_logs.txt")
     ap.add_argument("--node_id", type=int, default=0)
     ap.add_argument("--steps_ahead", dest="steps", type=int, default=1, help="滚动预测步数")
+    # ------ 调度模拟参数 ------
+    ap.add_argument("--req_cost", type=float, default=1.0, help="每个请求的计算资源消耗")
+    ap.add_argument("--alpha", type=float, default=1.0, help="网络延迟权重")
+    ap.add_argument("--beta", type=float, default=1.0, help="计算时间权重")
+    ap.add_argument("--margin_ms", type=float, default=14.0) 
+    ap.add_argument("--top_k", type=int, default=2)
+    ap.add_argument("--epsilon", type=float, default=0.2)
+
     args = ap.parse_args()
 
     if args.stage == "gen_logs":
@@ -140,6 +173,8 @@ def main():
         stage_train_transformer(args)
     elif args.stage == "infer_transformer":
         stage_infer_transformer(args)
+    elif args.stage == "simulate":
+        stage_simulate(args)
     else:
         raise ValueError(f"未知的 stage: {args.stage}")
 
