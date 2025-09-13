@@ -30,5 +30,13 @@ This project is to build a simulation system that includes multiple edge nodes (
 6) Simulate:
    python main.py --stage simulate --source results/node_logs.csv --ckpt model_output/ts_transformer_best.pt --window 30 --steps 200 --req_cost 1.5 --margin_ms 14 --fair_gamma 1.0 --fair_scale_ms 25 --fair_window 20 --cooldown_k 2 --cooldown_ms 4 --top_k 2 --epsilon 0.2 --safety_threshold_ms 5.0
 
-Legacy (GPT-2, archived)
-See legacy_gpt2/ (not maintained).
+## Result
+For the current dataset and model architecture, any scheduling strategy that attempts to enforce load balancing will lead to a significant decline in service quality (latency and timeout rate), and it is impossible to reduce the load imbalance to an ideal level.
+
+## Future Improvement
+   - More complex models: Introduce Graph Neural Networks (GNN) to model the network topology relationships among nodes. 
+   - More advanced algorithms: Use multi-objective reinforcement learning (Multi-Objective RL) to directly learn a scheduling strategy that can balance multiple objectives. 
+   - Larger-scale data: Validate the model's generalization ability on more realistic and larger-scale datasets.
+
+### Legacy (GPT-2, archived)
+   See legacy_gpt2/ (not maintained).
