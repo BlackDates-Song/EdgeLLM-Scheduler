@@ -3,16 +3,22 @@ import time
 import csv
 import argparse
 import sys
+import random
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from edge.edge_node import EdgeNode
+
+
 
 def generate_logs(
     out_txt="results/node_logs.txt",
     out_csv="results/node_logs.csv",
     num_nodes=5,
     steps=200,
-    interval=0.05
+    interval=0.05,
+    seed=42
 ):
+    random.seed(seed)
+
     os.makedirs(os.path.dirname(out_txt), exist_ok=True)
     os.makedirs(os.path.dirname(out_csv), exist_ok=True)
 
@@ -43,6 +49,7 @@ def main():
     ap.add_argument("--num_nodes", type=int, default=5)
     ap.add_argument("--steps", type=int, default=200)
     ap.add_argument("--interval", type=float, default=0.05)
+    ap.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
     args = ap.parse_args()
 
     generate_logs(
@@ -50,7 +57,8 @@ def main():
         out_csv=args.out_csv,
         num_nodes=args.num_nodes,
         steps=args.steps,
-        interval=args.interval
+        interval=args.interval,
+        seed=args.seed
     )
 
 if __name__ == "__main__":

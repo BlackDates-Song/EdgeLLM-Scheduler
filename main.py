@@ -18,27 +18,12 @@ def stage_gen_logs(args):
         "--out_csv", str(args.out_csv),
         "--num_nodes", str(args.num_nodes),
         "--steps", str(args.steps),
-        "--interval", str(args.interval)
+        "--interval", str(args.interval),
+        "--seed", str(args.seed),
     ]
     run(cmd)
 
-def stage_train_lstm(args):
-    cmd = [
-        PY, "model/train_eval_lstm.py",
-        "--input", str(args.input),
-        "--window", str(args.window),
-        "--epochs", str(args.epochs),
-        "--batch_size", str(args.batch_size),
-        "--hidden", str(args.hidden),
-        "--layers", str(args.LSTM_layers),
-    ]
-    if args.log_delay:
-        cmd.append("--log_delay")
-    if args.no_cuda:
-        cmd.append("--no_cuda")
-    run(cmd)
-
-def stage_train_transformer(args):
+def stage_train(args):
     cmd = [
         PY, "model/train_eval_transformer.py",
         "--input", str(args.input),
@@ -47,7 +32,7 @@ def stage_train_transformer(args):
         "--batch_size", str(args.batch_size),
         "--d_model", str(args.d_model),
         "--nhead", str(args.nhead),
-        "--layers", str(args.TS_layers),
+        "--layers", str(args.layers),
         "--ffn", str(args.ffn),
         "--dropout", str(args.dropout),
         "--delay_weight", str(args.delay_weight),
@@ -65,7 +50,7 @@ def stage_train_transformer(args):
         cmd.append("--huber_delay")
     run(cmd)
 
-def stage_infer_transformer(args):
+def stage_infer(args):
     cmd = [
         PY, "infer/infer_transformer.py",
         "--ckpt", args.ckpt,
@@ -76,7 +61,7 @@ def stage_infer_transformer(args):
         "--steps", str(args.steps),
         "--d_model", str(args.d_model),
         "--nhead", str(args.nhead),
-        "--layers", str(args.TS_layers),
+        "--layers", str(args.layers),
         "--ffn", str(args.ffn),
         "--dropout", str(args.dropout),
     ]
@@ -95,7 +80,7 @@ def stage_simulate(args):
         "--steps", str(args.steps),
         "--d_model", str(args.d_model),
         "--nhead", str(args.nhead),
-        "--layers", str(args.TS_layers),
+        "--layers", str(args.layers),
         "--ffn", str(args.ffn),
         "--dropout", str(args.dropout),
         "--req_cost", str(args.req_cost),
@@ -110,6 +95,7 @@ def stage_simulate(args):
         "--top_k", str(args.top_k),
         "--epsilon", str(args.epsilon),
         "--safety_threshold_ms", str(args.safety_threshold_ms),
+        "--num_nodes", str(args.num_nodes),
     ]
     if args.log_delay:
         cmd.append("--log_delay")
@@ -135,6 +121,7 @@ def main():
     ap.add_argument("--delay_max", type=float)
     ap.add_argument("--load_min", type=float)
     ap.add_argument("--load_max", type=float)
+    ap.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
     # ------ 模型训练通用参数 ------
     ap.add_argument("--input", default="results/node_logs.txt", help="日志文件路径（默认用 results/node_logs.txt）")
     ap.add_argument("--window", type=int, default=20)
@@ -142,13 +129,10 @@ def main():
     ap.add_argument("--batch_size", type=int, default=64)
     ap.add_argument("--log_delay", action="store_true")
     ap.add_argument("--no_cuda", action="store_true")
-    # ------ LSTM 训练参数 ------
-    ap.add_argument("--hidden", type=int, default=256)
-    ap.add_argument("--LSTM_layers", type=int, default=2)
     # ------ Transformer 训练参数 ------
     ap.add_argument("--d_model", type=int, default=128)
     ap.add_argument("--nhead", type=int, default=4)
-    ap.add_argument("--TS_layers", type=int, default=3)
+    ap.add_argument("--layers", type=int, default=3)
     ap.add_argument("--ffn", type=int, default=256)
     ap.add_argument("--dropout", type=float, default=0.1)
     ap.add_argument("--use_delta", action="store_true")
@@ -180,12 +164,10 @@ def main():
 
     if args.stage == "gen_logs":
         stage_gen_logs(args)
-    elif args.stage == "train_lstm":
-        stage_train_lstm(args)
-    elif args.stage == "train_transformer":
-        stage_train_transformer(args)
-    elif args.stage == "infer_transformer":
-        stage_infer_transformer(args)
+    elif args.stage == "train":
+        stage_train(args)
+    elif args.stage == "infer":
+        stage_infer(args)
     elif args.stage == "simulate":
         stage_simulate(args)
     else:
